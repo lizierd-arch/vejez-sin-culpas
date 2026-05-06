@@ -95,11 +95,21 @@ export default function App() {
     const profs = loadProfiles();
     return profs?.[0]?.onboardingDone ? VIEWS.HOME : VIEWS.ONBOARDING;
   });
+  const [installPrompt, setInstallPrompt] = useState(null);
 
   useEffect(() => {
     initSheets().catch(() => {});
     restoreReminder();
+    const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
+
+  async function handleInstall() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    setInstallPrompt(null);
+  }
 
   const profile = profiles?.[activeIndex] ?? null;
 
@@ -155,6 +165,7 @@ export default function App() {
               onDiaDificil={() => setView(VIEWS.DIA_DIFICIL)}
               onMiProceso={() => setView(VIEWS.MI_PROCESO)}
               onProtocolInfo={() => setView(VIEWS.PROTOCOL_INFO)}
+              onInstall={installPrompt ? handleInstall : null}
             />
           )}
 

@@ -35,7 +35,7 @@ function PetSwitcher({ profiles, activeIndex, onSwitch }) {
   );
 }
 
-export function Home({ profile, profiles, activeIndex, onSwitchProfile, onStartProtocol, onDiaDificil, onMiProceso, onProtocolInfo }) {
+export function Home({ profile, profiles, activeIndex, onSwitchProfile, onStartProtocol, onDiaDificil, onMiProceso, onProtocolInfo, onInstall }) {
   const question = getTodayQuestion(profile.name);
   const [answer, setAnswer] = useState('');
   const [saved, setSaved] = useState(false);
@@ -152,6 +152,21 @@ export function Home({ profile, profiles, activeIndex, onSwitchProfile, onStartP
           <span className="text-xs font-semibold text-warm-mid">El protocolo</span>
         </button>
       </div>
+
+      {/* Install banner — only shown when browser supports PWA install */}
+      {onInstall && (
+        <button
+          onClick={onInstall}
+          className="flex items-center gap-3 w-full bg-sage-pale border border-sage rounded-2xl p-4 text-left active:scale-95 transition-all"
+        >
+          <span className="text-2xl">📲</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-sage-dark">Instalar app</p>
+            <p className="text-xs text-warm-light">Agregar a tu pantalla de inicio</p>
+          </div>
+          <span className="text-sage-dark text-lg">›</span>
+        </button>
+      )}
     </div>
   );
 }
