@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Nunito', system-ui, sans-serif;
+    background-color: #FDF6EE;
+    color: #3D2C1E;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    overscroll-behavior: none;
+  }
+
+  input[type="time"]::-webkit-calendar-picker-indicator {
+    display: none;
+  }
+
+  textarea, input {
+    font-family: inherit;
+  }
+
+  /* Safe area insets for notched phones */
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@layer components {
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
