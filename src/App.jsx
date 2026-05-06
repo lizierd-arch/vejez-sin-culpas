@@ -144,6 +144,15 @@ export default function App() {
     handleSwitchProfile(1);
   }
 
+  function handleResetAll() {
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('vsc_'))
+      .forEach((k) => localStorage.removeItem(k));
+    setProfiles(null);
+    setActiveIndex(0);
+    setView(VIEWS.ONBOARDING);
+  }
+
   const showNav = view !== VIEWS.ONBOARDING;
 
   return (
@@ -196,6 +205,7 @@ export default function App() {
               onSaveProfile={handleSaveProfile}
               onSwitchProfile={(i) => { handleSwitchProfile(i); }}
               onAddProfile={handleAddProfile}
+              onResetAll={handleResetAll}
             />
           )}
 

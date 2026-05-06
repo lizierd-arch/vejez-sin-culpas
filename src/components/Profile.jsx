@@ -221,8 +221,9 @@ function PetTabs({ profiles, activeIndex, onSwitch }) {
   );
 }
 
-export function Profile({ profiles, activeIndex, onSaveProfile, onSwitchProfile, onAddProfile }) {
+export function Profile({ profiles, activeIndex, onSaveProfile, onSwitchProfile, onAddProfile, onResetAll }) {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const profile = profiles[activeIndex];
   const canAddSecond = profiles.length < 2;
 
@@ -273,6 +274,37 @@ export function Profile({ profiles, activeIndex, onSaveProfile, onSwitchProfile,
       {showAddForm && (
         <AddPetForm onAdd={handleAdd} onCancel={() => setShowAddForm(false)} />
       )}
+
+      {/* Reset */}
+      <div className="border-t border-border pt-6 mt-2 flex flex-col gap-3">
+        {!confirmReset ? (
+          <button
+            onClick={() => setConfirmReset(true)}
+            className="text-sm text-warm-pale hover:text-red-400 transition-colors py-2"
+          >
+            Resetear perfiles y borrar todos los datos
+          </button>
+        ) : (
+          <div className="flex flex-col gap-3 p-4 bg-red-50 rounded-2xl border border-red-200">
+            <p className="text-sm font-semibold text-red-700">¿Estás segura? Se borrarán todos los perfiles y registros locales.</p>
+            <p className="text-xs text-red-500">Los datos en Google Sheets no se verán afectados.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={onResetAll}
+                className="flex-1 min-h-[44px] bg-red-500 text-white font-semibold text-sm rounded-xl active:scale-95 transition-all"
+              >
+                Sí, borrar todo
+              </button>
+              <button
+                onClick={() => setConfirmReset(false)}
+                className="flex-1 min-h-[44px] border border-border text-warm-light text-sm rounded-xl active:scale-95"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

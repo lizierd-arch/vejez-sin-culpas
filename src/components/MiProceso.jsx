@@ -101,11 +101,19 @@ export function MiProceso({ profile, onBack }) {
     try {
       await initSheets();
       await signIn();
-      // Upload any local entries that aren't in Sheets yet, then load
       await syncLocalEntries(profile, localEntries);
       await loadSheetEntries();
-    } catch {
-      setError('No se pudo conectar. Verifica tu conexión y los permisos.');
+    } catch (e) {
+      const msg = e?.message || '';
+      if (msg === 'popup_closed' || msg === 'access_denied') {
+        setError('Cerraste la ventana de Google. Intenta de nuevo.');
+      } else if (msg === 'timeout') {
+        setError('La ventana de Google no respondió. Intenta de nuevo.');
+      } else if (msg === 'GIS not initialised') {
+        setError('Error de configuración. Recarga la página e intenta de nuevo.');
+      } else {
+        setError('No se pudo conectar. Verifica tu conexión e intenta de nuevo.');
+      }
     }
     setSigningIn(false);
   }

@@ -85,7 +85,7 @@ export async function initSheets() {
   tokenClient = window.google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
     scope: SCOPES,
-    callback: (resp) => { accessToken = resp.access_token; },
+    callback: () => {},
   });
   return true;
 }
@@ -93,13 +93,23 @@ export async function initSheets() {
 export function signIn() {
   return new Promise((resolve, reject) => {
     if (!tokenClient) { reject(new Error('GIS not initialised')); return; }
+
+    // Timeout: if the popup is blocked or ignored, don't hang forever
+    const timer = setTimeout(() => reject(new Error('timeout')), 90000);
+
     tokenClient.callback = (resp) => {
-      if (resp.error) { reject(resp); return; }
+      clearTimeout(timer);
+      if (resp.error) { reject(new Error(resp.error)); return; }
       accessToken = resp.access_token;
       window.gapi.client.setToken({ access_token: accessToken });
       resolve(accessToken);
     };
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    tokenClient.error_callback = (err) => {
+      clearTimeout(timer);
+      reject(new Error(err?.type || 'popup_closed'));
+    };
+    // Empty prompt: Google decides — no forced consent screen on every login
+    tokenClient.requestAccessToken({ prompt: '' });
   });
 }
 
