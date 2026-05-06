@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchEntries, isSignedIn, signIn, initSheets, getSheetUrl, syncLocalEntries } from '../services/sheets';
+import { fetchEntries, isSignedIn, redirectToSignIn, getSheetUrl, syncLocalEntries } from '../services/sheets';
 import { Button } from './shared/Button';
 
 const MOOD_EMOJI = {
@@ -81,59 +81,42 @@ function LocalEntry({ entry }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function MiProceso({ profile, onBack }) {
-  const [localEntries, setLocalEntries]   = useState([]);
-  const [sheetEntries, setSheetEntries]   = useState([]);
-  const [signingIn, setSigningIn]         = useState(false);
-  const [loading, setLoading]             = useState(false);
-  const [error, setError]                 = useState('');
+  const [localEntries, setLocalEntries] = useState([]);
+  const [sheetEntries, setSheetEntries] = useState([]);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState('');
   const streak = getStreak(profile.id);
 
   useEffect(() => {
     const raw = localStorage.getItem(`vsc_history_${profile.id}`);
-    setLocalEntries(raw ? JSON.parse(raw) : []);
-    // If already signed in, load sheet entries automatically
-    if (isSignedIn()) loadSheetEntries();
+    const entries = raw ? JSON.parse(raw) : [];
+    setLocalEntries(entries);
+    if (isSignedIn()) loadSheetEntries(entries);
   }, [profile.id]);
 
-  async function handleSignIn() {
-    setSigningIn(true);
-    setError('');
-    try {
-      await initSheets();
-      await signIn();
-      await syncLocalEntries(profile, localEntries);
-      await loadSheetEntries();
-    } catch (e) {
-      const msg = e?.message || '';
-      if (msg === 'popup_closed' || msg === 'access_denied') {
-        setError('Cerraste la ventana de Google. Intenta de nuevo.');
-      } else if (msg === 'timeout') {
-        setError('La ventana de Google no respondió. Intenta de nuevo.');
-      } else if (msg === 'GIS not initialised') {
-        setError('Error de configuración. Recarga la página e intenta de nuevo.');
-      } else {
-        setError('No se pudo conectar. Verifica tu conexión e intenta de nuevo.');
-      }
-    }
-    setSigningIn(false);
-  }
-
-  async function loadSheetEntries() {
+  async function loadSheetEntries(localForSync) {
     setLoading(true);
     setError('');
     try {
+      // Sync any local entries that aren't in Sheets yet
+      const local = localForSync ?? localEntries;
+      if (local.length) await syncLocalEntries(profile, local);
       const rows = await fetchEntries(profile);
       setSheetEntries(rows.reverse());
-    } catch {
-      setError('Error al cargar registros de Google Sheets.');
+    } catch (e) {
+      if (e?.message?.includes('Not signed in') || e?.message?.includes('401')) {
+        // Token expired — show reconnect prompt without error message
+        setSheetEntries([]);
+      } else {
+        setError('Error al cargar registros. Intenta de nuevo.');
+      }
     }
     setLoading(false);
   }
 
-  const signed        = isSignedIn();
-  const hasSheetData  = sheetEntries.length > 0;
-  const hasLocalData  = localEntries.length > 0;
-  // Show Sheets entries when connected; local entries when not connected or as pending-sync fallback
+  const signed       = isSignedIn();
+  const hasSheetData = sheetEntries.length > 0;
+  const hasLocalData = localEntries.length > 0;
   const showSheetView = signed && hasSheetData;
   const showLocalView = !showSheetView && hasLocalData;
   const totalCount    = showSheetView ? sheetEntries.length : localEntries.length;
@@ -169,9 +152,9 @@ export function MiProceso({ profile, onBack }) {
         </div>
       )}
 
-      {/* Google Sheets — connection + status */}
+      {/* Google Sheets panel */}
       <div className={`rounded-2xl p-4 border flex flex-col gap-3 ${
-        signed ? 'bg-sage-pale border-sage' : 'bg-surface-warm border-border'
+        signed && hasSheetData ? 'bg-sage-pale border-sage' : 'bg-surface-warm border-border'
       }`}>
         {!signed ? (
           <>
@@ -180,49 +163,62 @@ export function MiProceso({ profile, onBack }) {
               <div>
                 <p className="text-sm font-semibold text-warm-dark">Conecta con Google Sheets</p>
                 <p className="text-xs text-warm-light mt-0.5 leading-relaxed">
-                  Cada registro se guarda automáticamente en una hoja de cálculo organizada por mascota
-                  — lista para compartir con tu veterinario.
+                  Cada registro se guarda en una hoja organizada por mascota — lista para compartir con tu veterinario.
                 </p>
               </div>
             </div>
-            <Button onClick={handleSignIn} disabled={signingIn} variant="secondary">
-              {signingIn ? 'Conectando...' : '🔗 Conectar con Google Sheets'}
+            <Button onClick={redirectToSignIn} variant="secondary">
+              🔗 Conectar con Google Sheets
             </Button>
-            {error && <p className="text-xs text-red-500">{error}</p>}
+            <p className="text-xs text-warm-pale text-center">
+              Te redirigirá a Google y volverá automáticamente
+            </p>
           </>
         ) : loading ? (
           <div className="flex items-center gap-2 text-sm text-sage-dark">
-            <span className="animate-pulse-soft">⏳</span> Cargando registros...
+            <span className="animate-pulse-soft">⏳</span> Sincronizando registros...
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-lg">✅</span>
+                <span className="text-lg">{hasSheetData ? '✅' : '🔗'}</span>
                 <div>
-                  <p className="text-sm font-semibold text-sage-dark">Sincronizado con Google Sheets</p>
-                  <p className="text-xs text-sage">
-                    {sheetEntries.length} {sheetEntries.length === 1 ? 'registro' : 'registros'} · pestaña "{profile.name}"
+                  <p className="text-sm font-semibold text-sage-dark">
+                    {hasSheetData ? 'Sincronizado con Google Sheets' : 'Conectado — sin registros aún'}
                   </p>
+                  {hasSheetData && (
+                    <p className="text-xs text-sage">
+                      {sheetEntries.length} {sheetEntries.length === 1 ? 'registro' : 'registros'} · pestaña "{profile.name}"
+                    </p>
+                  )}
                 </div>
               </div>
-              {getSheetUrl() && (
-                <a
-                  href={getSheetUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold text-sage-dark bg-white/60 px-3 py-1.5 rounded-xl active:scale-95 transition-all"
+              <div className="flex items-center gap-2">
+                {getSheetUrl() && (
+                  <a
+                    href={getSheetUrl()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-sage-dark bg-white/60 px-3 py-1.5 rounded-xl active:scale-95 transition-all"
+                  >
+                    Abrir ↗
+                  </a>
+                )}
+                <button
+                  onClick={() => loadSheetEntries()}
+                  className="text-xs text-warm-pale px-2 py-1.5 rounded-xl active:scale-95"
                 >
-                  Abrir ↗
-                </a>
-              )}
+                  ↻
+                </button>
+              </div>
             </div>
             {error && <p className="text-xs text-red-500">{error}</p>}
           </>
         )}
       </div>
 
-      {/* Registros desde Google Sheets (fuente primaria cuando conectado) */}
+      {/* Registros desde Sheets */}
       {showSheetView && (
         <div className="flex flex-col gap-3">
           <p className="text-xs font-semibold text-warm-pale uppercase tracking-wide">
@@ -232,19 +228,17 @@ export function MiProceso({ profile, onBack }) {
         </div>
       )}
 
-      {/* Registros locales — cuando no está conectado o Sheets está vacío */}
+      {/* Registros locales */}
       {showLocalView && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-warm-pale uppercase tracking-wide">
-              {signed ? 'Guardado en este dispositivo (pendiente de sync)' : 'Tus registros'}
-            </p>
-          </div>
+          <p className="text-xs font-semibold text-warm-pale uppercase tracking-wide">
+            {signed ? 'Guardado en este dispositivo (pendiente de sync)' : 'Tus registros'}
+          </p>
           {localEntries.map((e, i) => <LocalEntry key={i} entry={e} />)}
         </div>
       )}
 
-      {/* Estado vacío — solo cuando realmente no hay nada */}
+      {/* Estado vacío */}
       {!showSheetView && !showLocalView && (
         <div className="text-center py-12 flex flex-col items-center gap-3 text-warm-pale">
           <span className="text-4xl">📔</span>

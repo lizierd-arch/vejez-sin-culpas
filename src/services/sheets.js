@@ -1,11 +1,14 @@
-// Google Sheets API v4 — Google Identity Services (GIS)
-// One spreadsheet per user account, one tab per pet.
+// Google Sheets API v4 via REST fetch — no GIS/GAPI scripts required.
+// Auth: OAuth 2.0 implicit-redirect flow (works in PWA standalone mode).
+// Token is persisted in localStorage so the user doesn't need to reconnect every session.
 
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-const API_KEY   = import.meta.env.VITE_GOOGLE_API_KEY   || '';
-const SCOPES    = 'https://www.googleapis.com/auth/spreadsheets';
+const CLIENT_ID  = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const SCOPES     = 'https://www.googleapis.com/auth/spreadsheets';
+const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 const SHEET_ID_KEY      = 'vsc_sheet_id';
+const TOKEN_KEY         = 'vsc_gtoken';
+const TOKEN_EXP_KEY     = 'vsc_gtoken_exp';
 const SPREADSHEET_TITLE = 'Vejez Sin Culpas';
 
 const HEADERS = [
@@ -14,16 +17,92 @@ const HEADERS = [
   'Pregunta del día','Respuesta','Modo',
 ];
 
-let tokenClient = null;
-let accessToken = null;
+// ── Token management ──────────────────────────────────────────────────────────
 
-// Tab names confirmed to exist — cleared on page load, OK since we re-verify then
-const confirmedTabs = new Set();
+let _token = null;
+
+function getToken() {
+  if (_token) return _token;
+  const stored = localStorage.getItem(TOKEN_KEY);
+  const exp    = parseInt(localStorage.getItem(TOKEN_EXP_KEY) || '0', 10);
+  if (stored && exp > Date.now()) { _token = stored; return _token; }
+  return null;
+}
+
+function saveToken(token, expiresInSeconds) {
+  _token = token;
+  const exp = Date.now() + (expiresInSeconds - 300) * 1000; // 5-min buffer
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_EXP_KEY, String(exp));
+}
+
+export function isSignedIn() { return !!getToken(); }
+
+export function signOut() {
+  _token = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXP_KEY);
+}
+
+export function getSheetUrl() {
+  const id = localStorage.getItem(SHEET_ID_KEY);
+  return id ? `https://docs.google.com/spreadsheets/d/${id}` : null;
+}
+
+// ── OAuth redirect flow ───────────────────────────────────────────────────────
+// Navigates the main window to Google, which redirects back with #access_token.
+// Works reliably in PWA standalone mode (no popups needed).
+
+export function redirectToSignIn() {
+  localStorage.setItem('vsc_auth_return', '1');
+  const params = new URLSearchParams({
+    client_id:    CLIENT_ID,
+    redirect_uri: window.location.origin,
+    response_type: 'token',
+    scope:        SCOPES,
+    prompt:       'select_account',
+  });
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+// Called once on app startup. Returns true if we just came back from Google auth.
+export function handleOAuthCallback() {
+  if (!window.location.hash.includes('access_token')) return false;
+  const params    = new URLSearchParams(window.location.hash.slice(1));
+  const token     = params.get('access_token');
+  const expiresIn = parseInt(params.get('expires_in') || '3600', 10);
+  if (!token) return false;
+  saveToken(token, expiresIn);
+  // Clean the hash from the URL bar
+  window.history.replaceState({}, '', window.location.pathname);
+  return true;
+}
+
+// ── REST helper ───────────────────────────────────────────────────────────────
+
+async function api(method, url, body = null) {
+  const token = getToken();
+  if (!token) throw new Error('Not signed in');
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization:  `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err?.error?.message || `HTTP ${res.status}`;
+    // 401 means token expired — clear it so isSignedIn() returns false
+    if (res.status === 401) { _token = null; localStorage.removeItem(TOKEN_KEY); }
+    throw new Error(msg);
+  }
+  return res.json();
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Wraps a sheet name in single quotes for use in A1 notation ranges.
-// Required when the name contains spaces or special characters.
 function q(name) { return `'${name.replace(/'/g, "''")}'`; }
 
 function fmtDate(isoOrDate) {
@@ -35,219 +114,125 @@ function entryToRow(profile, entry) {
   return [
     entry.date ? fmtDate(entry.date) : fmtDate(new Date()),
     profile.name,
-    entry.obs1            || '',
-    entry.obs2            || '',
-    entry.mood            || '',
-    entry.activityType    || '',
-    entry.activityReaction|| '',
-    entry.reg1            || '',
-    entry.reg2            || '',
-    entry.reg3            || '',
-    entry.question        || '',
-    entry.questionAnswer  || '',
-    entry.mode            || 'normal',
+    entry.obs1             || '',
+    entry.obs2             || '',
+    entry.mood             || '',
+    entry.activityType     || '',
+    entry.activityReaction || '',
+    entry.reg1             || '',
+    entry.reg2             || '',
+    entry.reg3             || '',
+    entry.question         || '',
+    entry.questionAnswer   || '',
+    entry.mode             || 'normal',
   ];
 }
 
-// ── Script loaders ────────────────────────────────────────────────────────────
-function loadGIS() {
-  return new Promise((resolve) => {
-    if (window.google?.accounts?.oauth2) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.onload = resolve;
-    document.head.appendChild(s);
-  });
-}
-
-function loadGAPI() {
-  return new Promise((resolve) => {
-    if (window.gapi?.client) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://apis.google.com/js/api.js';
-    s.onload = () => {
-      window.gapi.load('client', async () => {
-        await window.gapi.client.init({
-          apiKey: API_KEY,
-          discoveryDocs: ['https://sheets.googleapis.com/$discovery/rest?version=v4'],
-        });
-        resolve();
-      });
-    };
-    document.head.appendChild(s);
-  });
-}
-
-// ── Auth ──────────────────────────────────────────────────────────────────────
-export async function initSheets() {
-  if (!CLIENT_ID || !API_KEY) return false;
-  await Promise.all([loadGIS(), loadGAPI()]);
-  tokenClient = window.google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: () => {},
-  });
-  return true;
-}
-
-export function signIn() {
-  return new Promise((resolve, reject) => {
-    if (!tokenClient) { reject(new Error('GIS not initialised')); return; }
-
-    // Timeout: if the popup is blocked or ignored, don't hang forever
-    const timer = setTimeout(() => reject(new Error('timeout')), 90000);
-
-    tokenClient.callback = (resp) => {
-      clearTimeout(timer);
-      if (resp.error) { reject(new Error(resp.error)); return; }
-      accessToken = resp.access_token;
-      window.gapi.client.setToken({ access_token: accessToken });
-      resolve(accessToken);
-    };
-    tokenClient.error_callback = (err) => {
-      clearTimeout(timer);
-      reject(new Error(err?.type || 'popup_closed'));
-    };
-    // Empty prompt: Google decides — no forced consent screen on every login
-    tokenClient.requestAccessToken({ prompt: '' });
-  });
-}
-
-export function isSignedIn() { return !!accessToken; }
-
-export function getSheetUrl() {
-  const id = localStorage.getItem(SHEET_ID_KEY);
-  return id ? `https://docs.google.com/spreadsheets/d/${id}` : null;
-}
-
 // ── Spreadsheet ───────────────────────────────────────────────────────────────
+
+const confirmedTabs = new Set();
+
 async function findOrCreateSpreadsheet() {
   const storedId = localStorage.getItem(SHEET_ID_KEY);
   if (storedId) {
     try {
-      await window.gapi.client.sheets.spreadsheets.get({ spreadsheetId: storedId });
+      await api('GET', `${SHEETS_API}/${storedId}?fields=spreadsheetId`);
       return storedId;
     } catch {
       localStorage.removeItem(SHEET_ID_KEY);
     }
   }
-  const resp = await window.gapi.client.sheets.spreadsheets.create({
-    resource: { properties: { title: SPREADSHEET_TITLE } },
+  const resp = await api('POST', SHEETS_API, {
+    properties: { title: SPREADSHEET_TITLE },
   });
-  const id = resp.result.spreadsheetId;
-  localStorage.setItem(SHEET_ID_KEY, id);
-  return id;
+  localStorage.setItem(SHEET_ID_KEY, resp.spreadsheetId);
+  return resp.spreadsheetId;
 }
 
-// ── Pet tab ───────────────────────────────────────────────────────────────────
 async function findOrCreatePetTab(spreadsheetId, petName) {
-  if (confirmedTabs.has(petName)) return petName;
+  if (confirmedTabs.has(petName)) return;
 
-  const meta   = await window.gapi.client.sheets.spreadsheets.get({ spreadsheetId });
-  const sheets = meta.result.sheets || [];
+  const meta   = await api('GET', `${SHEETS_API}/${spreadsheetId}?fields=sheets.properties`);
+  const sheets = meta.sheets || [];
   const found  = sheets.find((s) => s.properties.title === petName);
 
   if (!found) {
-    // Create tab
-    const addResp = await window.gapi.client.sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      resource: { requests: [{ addSheet: { properties: { title: petName } } }] },
+    const addResp = await api('POST', `${SHEETS_API}/${spreadsheetId}:batchUpdate`, {
+      requests: [{ addSheet: { properties: { title: petName } } }],
     });
-
-    // The sheetId comes back in the addSheet reply — no need for a second GET
-    const newSheetId = addResp.result.replies[0].addSheet.properties.sheetId;
+    const newSheetId = addResp.replies[0].addSheet.properties.sheetId;
 
     // Write header row
-    await window.gapi.client.sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${q(petName)}!A1:M1`,
-      valueInputOption: 'USER_ENTERED',
-      resource: { values: [HEADERS] },
-    });
+    await api('PUT',
+      `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(`${q(petName)}!A1:M1`)}?valueInputOption=USER_ENTERED`,
+      { values: [HEADERS] },
+    );
 
     // Format header: terracotta bg + bold white text
-    await window.gapi.client.sheets.spreadsheets.batchUpdate({
-      spreadsheetId,
-      resource: {
-        requests: [{
-          repeatCell: {
-            range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 13 },
-            cell: {
-              userEnteredFormat: {
-                backgroundColor: { red: 0.77, green: 0.44, blue: 0.29 },
-                textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
-              },
+    await api('POST', `${SHEETS_API}/${spreadsheetId}:batchUpdate`, {
+      requests: [{
+        repeatCell: {
+          range: { sheetId: newSheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 13 },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: { red: 0.77, green: 0.44, blue: 0.29 },
+              textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
             },
-            fields: 'userEnteredFormat(backgroundColor,textFormat)',
           },
-        }],
-      },
+          fields: 'userEnteredFormat(backgroundColor,textFormat)',
+        },
+      }],
     });
   }
 
   confirmedTabs.add(petName);
-  return petName;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Append a single entry to the pet's tab. */
 export async function appendEntry(profile, data) {
-  if (!accessToken) throw new Error('Not signed in');
+  if (!getToken()) return; // silently skip — entry is already saved locally
   const spreadsheetId = await findOrCreateSpreadsheet();
   await findOrCreatePetTab(spreadsheetId, profile.name);
-
-  await window.gapi.client.sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${q(profile.name)}!A:M`,
-    valueInputOption: 'USER_ENTERED',
-    resource: { values: [entryToRow(profile, data)] },
-  });
+  await api('POST',
+    `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(`${q(profile.name)}!A:M`)}:append?valueInputOption=USER_ENTERED`,
+    { values: [entryToRow(profile, data)] },
+  );
 }
 
-/** Upload every local entry that isn't yet in the Sheet.
- *  Strategy: compare row count in Sheet vs local entries.
- *  If Sheet has fewer rows, append the difference (oldest-first). */
 export async function syncLocalEntries(profile, localEntries) {
-  if (!accessToken) throw new Error('Not signed in');
+  if (!getToken()) throw new Error('Not signed in');
   if (!localEntries.length) return 0;
 
   const spreadsheetId = await findOrCreateSpreadsheet();
   await findOrCreatePetTab(spreadsheetId, profile.name);
 
-  // Count existing data rows in Sheet (excluding header)
-  const existing = await window.gapi.client.sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${q(profile.name)}!A2:A`,
-  });
-  const sheetCount = (existing.result.values || []).length;
+  const existing   = await api('GET',
+    `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(`${q(profile.name)}!A2:A`)}`,
+  );
+  const sheetCount = (existing.values || []).length;
   const localCount = localEntries.length;
+  if (sheetCount >= localCount) return 0;
 
-  if (sheetCount >= localCount) return 0; // already in sync
-
-  // Entries are stored newest-first locally; upload the oldest ones that Sheet is missing
   const toUpload = [...localEntries].reverse().slice(sheetCount);
-  const rows     = toUpload.map((e) => entryToRow(profile, e));
-
-  await window.gapi.client.sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${q(profile.name)}!A:M`,
-    valueInputOption: 'USER_ENTERED',
-    resource: { values: rows },
-  });
-
+  await api('POST',
+    `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(`${q(profile.name)}!A:M`)}:append?valueInputOption=USER_ENTERED`,
+    { values: toUpload.map((e) => entryToRow(profile, e)) },
+  );
   return toUpload.length;
 }
 
-/** Fetch all entries for a pet from its tab. */
 export async function fetchEntries(profile) {
-  if (!accessToken) throw new Error('Not signed in');
+  if (!getToken()) throw new Error('Not signed in');
   const spreadsheetId = await findOrCreateSpreadsheet();
   await findOrCreatePetTab(spreadsheetId, profile.name);
 
-  const resp = await window.gapi.client.sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${q(profile.name)}!A2:M`,
-  });
-  return resp.result.values || [];
+  const resp = await api('GET',
+    `${SHEETS_API}/${spreadsheetId}/values/${encodeURIComponent(`${q(profile.name)}!A2:M`)}`,
+  );
+  return resp.values || [];
 }
+
+// Legacy stubs — kept so existing callers don't break during transition
+export async function initSheets() { return !!CLIENT_ID; }
+export async function signIn() { redirectToSignIn(); return new Promise(() => {}); }
