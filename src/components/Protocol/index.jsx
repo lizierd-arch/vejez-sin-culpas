@@ -3,7 +3,6 @@ import { Step1Observation } from './Step1Observation';
 import { Step2Activity } from './Step2Activity';
 import { Step3Registro } from './Step3Registro';
 import { getTodayQuestion } from '../../data/questions';
-import { appendEntry, isSignedIn } from '../../services/sheets';
 
 function updateStreak(profileId) {
   const key = `vsc_streak_${profileId}`;
@@ -29,11 +28,6 @@ export function Protocol({ profile, onComplete }) {
   async function handleStep3(d) {
     const full = { ...data, ...d, question: getTodayQuestion(profile.name), mode: 'normal' };
     setSaving(true);
-    try {
-      if (isSignedIn()) await appendEntry(profile, full);
-    } catch (e) {
-      console.error(e);
-    }
     // Save locally per profile
     const historyKey = `vsc_history_${profile.id}`;
     const history = JSON.parse(localStorage.getItem(historyKey) || '[]');

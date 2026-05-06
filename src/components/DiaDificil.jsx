@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Button } from './shared/Button';
 import { TextInput } from './shared/TextInput';
 import { MoodPicker } from './shared/MoodPicker';
-import { appendEntry, isSignedIn } from '../services/sheets';
 
 export function DiaDificil({ profile, onBack }) {
   const [howWasPet, setHowWasPet] = useState('');
@@ -24,11 +23,6 @@ export function DiaDificil({ profile, onBack }) {
       questionAnswer: '',
       mode: 'día-difícil',
     };
-    try {
-      if (isSignedIn()) await appendEntry(profile, entry);
-    } catch (e) {
-      console.error(e);
-    }
     const historyKey = `vsc_history_${profile.id}`;
     const history = JSON.parse(localStorage.getItem(historyKey) || '[]');
     history.unshift({ ...entry, date: new Date().toISOString() });

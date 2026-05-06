@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchEntries, isSignedIn, redirectToSignIn, getSheetUrl, syncLocalEntries } from '../services/sheets';
+import { exportToCSV } from '../services/export';
 import { Button } from './shared/Button';
 
 const MOOD_EMOJI = {
@@ -13,50 +13,8 @@ function getStreak(profileId) {
   try { return JSON.parse(localStorage.getItem(`vsc_streak_${profileId}`) || '{}'); } catch { return {}; }
 }
 
-// ── Entry cards ───────────────────────────────────────────────────────────────
+// ── Entry card ────────────────────────────────────────────────────────────────
 function EntryCard({ entry }) {
-  const [fecha, , obs1, , mood, tipo, , reg1, , , pregunta, respuesta, modo] = entry;
-  return (
-    <div className="bg-surface-warm rounded-2xl p-4 border border-border shadow-card flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-warm-light">{fecha}</span>
-        <div className="flex items-center gap-2">
-          {mood && <span className="text-lg">{MOOD_EMOJI[mood] || '🐾'}</span>}
-          {modo && modo !== 'normal' && (
-            <span className="text-xs bg-cream-dark text-warm-light px-2 py-0.5 rounded-full">
-              {MODE_LABELS[modo] || modo}
-            </span>
-          )}
-        </div>
-      </div>
-      {obs1 && (
-        <div>
-          <p className="text-xs font-semibold text-warm-pale mb-1">OBSERVACIÓN</p>
-          <p className="text-sm text-warm-dark leading-relaxed line-clamp-2">{obs1}</p>
-        </div>
-      )}
-      {tipo && (
-        <span className="text-xs bg-sage-pale text-sage-dark font-semibold px-2 py-0.5 rounded-full self-start">
-          {tipo === 'Mental' ? '🧠' : tipo === 'Física' ? '🌿' : '❤️'} {tipo}
-        </span>
-      )}
-      {reg1 && (
-        <div>
-          <p className="text-xs font-semibold text-warm-pale mb-1">REGISTRO</p>
-          <p className="text-sm text-warm-dark leading-relaxed line-clamp-2 italic">"{reg1}"</p>
-        </div>
-      )}
-      {pregunta && respuesta && (
-        <div className="p-3 bg-terracotta-pale rounded-xl">
-          <p className="text-xs text-terracotta-dark leading-relaxed">{pregunta}</p>
-          <p className="text-sm text-warm-dark mt-1 italic">"{respuesta}"</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LocalEntry({ entry }) {
   const date = new Date(entry.date).toLocaleDateString('es-MX', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
@@ -73,53 +31,53 @@ function LocalEntry({ entry }) {
           )}
         </div>
       </div>
-      {entry.obs1 && <p className="text-sm text-warm-dark leading-relaxed line-clamp-2">{entry.obs1}</p>}
-      {entry.reg1 && <p className="text-sm text-warm-dark italic line-clamp-2">"{entry.reg1}"</p>}
+      {entry.obs1 && (
+        <p className="text-sm text-warm-dark leading-relaxed line-clamp-2">{entry.obs1}</p>
+      )}
+      {entry.activityType && (
+        <span className="text-xs bg-sage-pale text-sage-dark font-semibold px-2 py-0.5 rounded-full self-start">
+          {entry.activityType === 'Mental' ? '🧠' : entry.activityType === 'Física' ? '🌿' : '❤️'} {entry.activityType}
+        </span>
+      )}
+      {entry.reg1 && (
+        <p className="text-sm text-warm-dark italic line-clamp-2">"{entry.reg1}"</p>
+      )}
+      {entry.question && entry.questionAnswer && (
+        <div className="p-3 bg-terracotta-pale rounded-xl">
+          <p className="text-xs text-terracotta-dark leading-relaxed">{entry.question}</p>
+          <p className="text-sm text-warm-dark mt-1 italic">"{entry.questionAnswer}"</p>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export function MiProceso({ profile, onBack }) {
-  const [localEntries, setLocalEntries] = useState([]);
-  const [sheetEntries, setSheetEntries] = useState([]);
-  const [loading, setLoading]           = useState(false);
-  const [error, setError]               = useState('');
+  const [entries, setEntries]     = useState([]);
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported]   = useState(false);
   const streak = getStreak(profile.id);
 
   useEffect(() => {
     const raw = localStorage.getItem(`vsc_history_${profile.id}`);
-    const entries = raw ? JSON.parse(raw) : [];
-    setLocalEntries(entries);
-    if (isSignedIn()) loadSheetEntries(entries);
+    setEntries(raw ? JSON.parse(raw) : []);
+    setExported(false);
   }, [profile.id]);
 
-  async function loadSheetEntries(localForSync) {
-    setLoading(true);
-    setError('');
+  async function handleExport() {
+    setExporting(true);
     try {
-      // Sync any local entries that aren't in Sheets yet
-      const local = localForSync ?? localEntries;
-      if (local.length) await syncLocalEntries(profile, local);
-      const rows = await fetchEntries(profile);
-      setSheetEntries(rows.reverse());
-    } catch (e) {
-      if (e?.message?.includes('Not signed in') || e?.message?.includes('401')) {
-        // Token expired — show reconnect prompt without error message
-        setSheetEntries([]);
-      } else {
-        setError('Error al cargar registros. Intenta de nuevo.');
-      }
+      await exportToCSV(profile, entries);
+      setExported(true);
+      setTimeout(() => setExported(false), 3000);
+    } catch {
+      // user cancelled share sheet — not an error
     }
-    setLoading(false);
+    setExporting(false);
   }
 
-  const signed       = isSignedIn();
-  const hasSheetData = sheetEntries.length > 0;
-  const hasLocalData = localEntries.length > 0;
-  const showSheetView = signed && hasSheetData;
-  const showLocalView = !showSheetView && hasLocalData;
-  const totalCount    = showSheetView ? sheetEntries.length : localEntries.length;
+  const totalCount = entries.length;
 
   return (
     <div className="animate-fade-in flex flex-col gap-5 pb-8">
@@ -133,7 +91,7 @@ export function MiProceso({ profile, onBack }) {
         </div>
       </div>
 
-      {/* Streak */}
+      {/* Streak / totales */}
       {(streak.count > 0 || totalCount > 0) && (
         <div className="flex items-center gap-3 bg-terracotta-pale rounded-2xl p-4 border border-terracotta/20">
           <span className="text-2xl">🔥</span>
@@ -152,94 +110,37 @@ export function MiProceso({ profile, onBack }) {
         </div>
       )}
 
-      {/* Google Sheets panel */}
-      <div className={`rounded-2xl p-4 border flex flex-col gap-3 ${
-        signed && hasSheetData ? 'bg-sage-pale border-sage' : 'bg-surface-warm border-border'
-      }`}>
-        {!signed ? (
-          <>
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">📊</span>
-              <div>
-                <p className="text-sm font-semibold text-warm-dark">Conecta con Google Sheets</p>
-                <p className="text-xs text-warm-light mt-0.5 leading-relaxed">
-                  Cada registro se guarda en una hoja organizada por mascota — lista para compartir con tu veterinario.
-                </p>
-              </div>
+      {/* Exportar CSV */}
+      {totalCount > 0 && (
+        <div className="bg-surface-warm rounded-2xl p-4 border border-border flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">📋</span>
+            <div>
+              <p className="text-sm font-semibold text-warm-dark">Exportar registros</p>
+              <p className="text-xs text-warm-light mt-0.5 leading-relaxed">
+                Descarga un archivo CSV con todos los registros de {profile.name} — puedes abrirlo en Excel o compartirlo con tu veterinario.
+              </p>
             </div>
-            <Button onClick={redirectToSignIn} variant="secondary">
-              🔗 Conectar con Google Sheets
-            </Button>
-            <p className="text-xs text-warm-pale text-center">
-              Te redirigirá a Google y volverá automáticamente
-            </p>
-          </>
-        ) : loading ? (
-          <div className="flex items-center gap-2 text-sm text-sage-dark">
-            <span className="animate-pulse-soft">⏳</span> Sincronizando registros...
           </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">{hasSheetData ? '✅' : '🔗'}</span>
-                <div>
-                  <p className="text-sm font-semibold text-sage-dark">
-                    {hasSheetData ? 'Sincronizado con Google Sheets' : 'Conectado — sin registros aún'}
-                  </p>
-                  {hasSheetData && (
-                    <p className="text-xs text-sage">
-                      {sheetEntries.length} {sheetEntries.length === 1 ? 'registro' : 'registros'} · pestaña "{profile.name}"
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {getSheetUrl() && (
-                  <a
-                    href={getSheetUrl()}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-sage-dark bg-white/60 px-3 py-1.5 rounded-xl active:scale-95 transition-all"
-                  >
-                    Abrir ↗
-                  </a>
-                )}
-                <button
-                  onClick={() => loadSheetEntries()}
-                  className="text-xs text-warm-pale px-2 py-1.5 rounded-xl active:scale-95"
-                >
-                  ↻
-                </button>
-              </div>
-            </div>
-            {error && <p className="text-xs text-red-500">{error}</p>}
-          </>
-        )}
-      </div>
-
-      {/* Registros desde Sheets */}
-      {showSheetView && (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs font-semibold text-warm-pale uppercase tracking-wide">
-            Registros en Google Sheets · {profile.name}
-          </p>
-          {sheetEntries.map((e, i) => <EntryCard key={i} entry={e} />)}
+          <Button
+            onClick={handleExport}
+            disabled={exporting}
+            variant="secondary"
+          >
+            {exported ? '✓ Archivo listo' : exporting ? 'Preparando...' : '⬇ Exportar a CSV'}
+          </Button>
         </div>
       )}
 
-      {/* Registros locales */}
-      {showLocalView && (
+      {/* Lista de registros */}
+      {totalCount > 0 ? (
         <div className="flex flex-col gap-3">
           <p className="text-xs font-semibold text-warm-pale uppercase tracking-wide">
-            {signed ? 'Guardado en este dispositivo (pendiente de sync)' : 'Tus registros'}
+            Registros · {profile.name}
           </p>
-          {localEntries.map((e, i) => <LocalEntry key={i} entry={e} />)}
+          {entries.map((e, i) => <EntryCard key={i} entry={e} />)}
         </div>
-      )}
-
-      {/* Estado vacío */}
-      {!showSheetView && !showLocalView && (
+      ) : (
         <div className="text-center py-12 flex flex-col items-center gap-3 text-warm-pale">
           <span className="text-4xl">📔</span>
           <p className="text-sm">Todavía no hay registros.<br />¡Haz tu primer protocolo!</p>

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { getTodayQuestion } from '../data/questions';
 import { Button } from './shared/Button';
 import { TextInput } from './shared/TextInput';
-import { isSignedIn, appendEntry } from '../services/sheets';
 
 function getStreak(profileId) {
   try { return JSON.parse(localStorage.getItem(`vsc_streak_${profileId}`) || '{}'); } catch { return {}; }
@@ -56,7 +55,7 @@ export function Home({ profile, profiles, activeIndex, onSwitchProfile, onStartP
     return 'Buenas noches';
   })();
 
-  async function handleSaveAnswer() {
+  function handleSaveAnswer() {
     if (!answer.trim()) return;
     const entry = {
       question,
@@ -65,11 +64,10 @@ export function Home({ profile, profiles, activeIndex, onSwitchProfile, onStartP
       obs1: '', obs2: '', mood: '', activityType: '', activityReaction: '',
       reg1: '', reg2: '', reg3: '',
     };
-    try {
-      if (isSignedIn()) await appendEntry(profile, entry);
-    } catch (e) {
-      console.error(e);
-    }
+    const historyKey = `vsc_history_${profile.id}`;
+    const history = JSON.parse(localStorage.getItem(historyKey) || '[]');
+    history.unshift({ ...entry, date: new Date().toISOString() });
+    localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 90)));
     const updated = updateStreak(profile.id);
     setStreak(updated);
     setSaved(true);

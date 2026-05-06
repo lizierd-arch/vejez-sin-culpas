@@ -6,7 +6,6 @@ import { DiaDificil } from './components/DiaDificil';
 import { MiProceso } from './components/MiProceso';
 import { Profile } from './components/Profile';
 import { ProtocolInfo } from './components/ProtocolInfo';
-import { handleOAuthCallback } from './services/sheets';
 import { restoreReminder } from './services/notifications';
 
 // ─── Migration from single-profile (v1) to multi-profile (v2) ────────────────
@@ -98,12 +97,6 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState(null);
 
   useEffect(() => {
-    // Handle redirect back from Google OAuth — must run before anything else
-    const justAuthed = handleOAuthCallback();
-    if (justAuthed && localStorage.getItem('vsc_auth_return')) {
-      localStorage.removeItem('vsc_auth_return');
-      setView(VIEWS.MI_PROCESO);
-    }
     restoreReminder();
     const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
