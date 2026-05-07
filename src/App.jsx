@@ -6,7 +6,6 @@ import { DiaDificil } from './components/DiaDificil';
 import { MiProceso } from './components/MiProceso';
 import { Profile } from './components/Profile';
 import { ProtocolInfo } from './components/ProtocolInfo';
-import { restoreReminder } from './services/notifications';
 
 // ─── Migration from single-profile (v1) to multi-profile (v2) ────────────────
 function migrateIfNeeded() {
@@ -97,7 +96,6 @@ export default function App() {
   const [installPrompt, setInstallPrompt] = useState(null);
 
   useEffect(() => {
-    restoreReminder();
     const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);

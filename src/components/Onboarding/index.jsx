@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Step1Profile } from './Step1Profile';
 import { Step2Protocol } from './Step2Protocol';
-import { Step3Reminder } from './Step3Reminder';
 
-const STEP_COUNT = 3;
+const STEP_COUNT = 2;
 
 function ProgressDots({ step }) {
   return (
@@ -29,12 +28,8 @@ export function Onboarding({ onComplete }) {
     setStep(2);
   }
 
-  function handleProtocol() {
-    setStep(3);
-  }
-
-  function handleFinish(reminderTime, notifEnabled) {
-    const data = { ...profile, reminderTime, notifEnabled, onboardingDone: true };
+  function handleFinish() {
+    const data = { ...profile, onboardingDone: true };
     localStorage.setItem('vsc_profile', JSON.stringify(data));
     onComplete(data);
   }
@@ -44,8 +39,7 @@ export function Onboarding({ onComplete }) {
       <ProgressDots step={step} />
       <div className="flex-1 px-5 pb-8 flex flex-col max-w-sm mx-auto w-full">
         {step === 1 && <Step1Profile onNext={handleProfile} />}
-        {step === 2 && <Step2Protocol petName={profile?.name || 'tu mascota'} onNext={handleProtocol} />}
-        {step === 3 && <Step3Reminder petName={profile?.name || 'tu mascota'} onFinish={handleFinish} />}
+        {step === 2 && <Step2Protocol petName={profile?.name || 'tu mascota'} onNext={handleFinish} />}
       </div>
     </div>
   );

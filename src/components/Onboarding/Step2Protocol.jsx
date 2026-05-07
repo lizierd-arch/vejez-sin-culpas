@@ -58,7 +58,7 @@ export function Step2Protocol({ petName, onNext }) {
         </div>
       </div>
 
-      <Button onClick={onNext}>Entendí, continuemos</Button>
+      <Button onClick={onNext}>¡Empezar el protocolo!</Button>
     </div>
   );
 }
